@@ -30,7 +30,7 @@ if "train" in ds_mmdoc:
     test_datasets.append(split["test"])
 
 # 合并拆分后的训练集和测试集
-from datasets import concatenate_datasets
+from mmdoc import concatenate_datasets
 
 if len(train_datasets) > 1:
     train_dataset = concatenate_datasets(train_datasets)
@@ -44,6 +44,8 @@ else:
 
 print("训练集大小:", len(train_dataset))
 print("测试集大小:", len(test_dataset))
+print("M2KR 数据集字段:", ds_m2kr["train"].column_names)
+print("MMDocIR 数据集字段:", ds_mmdoc["train"].column_names)
 
 # -------------------------------
 # 2. 初始化 CLIP 模型和处理器
