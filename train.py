@@ -15,20 +15,22 @@ ds_m2kr = load_dataset("BByrneLab/multi_task_multi_modal_knowledge_retrieval_ben
 # 加载 MMDocIR-Challenge 数据集
 ds_mmdoc = load_dataset("MMDocIR/MMDocIR-Challenge")
 
-# 假设两个数据集均有 'train' 和 'test' split，
-# 我们将两者的训练集和测试集合并，以获得更丰富的数据
+# 假设两个数据集都只有 "train"，可以分别拆分后再合并
 train_datasets = []
 test_datasets = []
 
 if "train" in ds_m2kr:
-    train_datasets.append(ds_m2kr["train"])
-if "train" in ds_mmdoc:
-    train_datasets.append(ds_mmdoc["train"])
+    split = ds_m2kr["train"].train_test_split(test_size=0.1, seed=42)
+    train_datasets.append(split["train"])
+    test_datasets.append(split["test"])
 
-if "test" in ds_m2kr:
-    test_datasets.append(ds_m2kr["test"])
-if "test" in ds_mmdoc:
-    test_datasets.append(ds_mmdoc["test"])
+if "train" in ds_mmdoc:
+    split = ds_mmdoc["train"].train_test_split(test_size=0.1, seed=42)
+    train_datasets.append(split["train"])
+    test_datasets.append(split["test"])
+
+# 合并拆分后的训练集和测试集
+from datasets import concatenate_datasets
 
 if len(train_datasets) > 1:
     train_dataset = concatenate_datasets(train_datasets)
@@ -39,6 +41,9 @@ if len(test_datasets) > 1:
     test_dataset = concatenate_datasets(test_datasets)
 else:
     test_dataset = test_datasets[0]
+
+print("训练集大小:", len(train_dataset))
+print("测试集大小:", len(test_dataset))
 
 # -------------------------------
 # 2. 初始化 CLIP 模型和处理器
@@ -56,20 +61,25 @@ def collate_fn(batch):
     texts = []
     images = []
     for item in batch:
-        # 根据数据集实际字段名称调整，以下假设每个样本包含 "text" 和 "image" 字段
+        # 根据实际情况调整字段名称
         texts.append(item.get("text", ""))
+
         img_item = item.get("image", None)
-        # 如果图像为文件路径，则加载图像
-        if isinstance(img_item, str):
-            if os.path.exists(img_item):
-                image = Image.open(img_item).convert("RGB")
-            else:
-                raise FileNotFoundError(f"Image file not found: {img_item}")
+        # 如果图像数据为 None，则创建一张占位图（这里设置大小为 224x224，可根据模型要求调整）
+        if img_item is None:
+            image = Image.new("RGB", (224, 224), (255, 255, 255))
         else:
-            image = img_item  # 假设已为 PIL.Image 对象
+            # 如果 img_item 为文件路径，则加载图像
+            if isinstance(img_item, str):
+                if os.path.exists(img_item):
+                    image = Image.open(img_item).convert("RGB")
+                else:
+                    raise FileNotFoundError(f"Image file not found: {img_item}")
+            else:
+                image = img_item  # 假设已经是 PIL.Image 对象
         images.append(image)
 
-    # 利用 CLIPProcessor 同时预处理文本和图像
+    # 同时预处理文本和图像
     inputs = processor(text=texts, images=images, return_tensors="pt", padding=True)
     return inputs
 
