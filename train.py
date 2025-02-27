@@ -4,23 +4,24 @@ import torch
 import csv
 import io
 from PIL import Image
-from transformers import BlipProcessor, BlipForConditionalGeneration
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
+from transformers import Blip2Processor
+from transformers import BlipForConditionalGeneration
 
 # ✅ 设备选择
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# ✅ 加载 BLIP-2 处理器和模型
-processor = BlipProcessor.from_pretrained("Salesforce/blip2-flan-t5-xl")
-model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip2-flan-t5-xl").to(device)
+# ✅ 切换到 OPT 版本（支持推理）
+processor = Blip2Processor.from_pretrained("Salesforce/blip2-opt-2.7b", force_download=True)
+model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip2-opt-2.7b").to("cuda")
 
 # ✅ 读取 `MMDocIR_doc_passages.parquet`
-df = pd.read_parquet("MMDocIR_doc_passages.parquet")
+df = pd.read_parquet("mmdoc/MMDocIR_doc_passages.parquet")
 
 # ✅ 读取 `MMDocIR_gt_remove.jsonl`（测试集查询）
 queries = []
-with open("MMDocIR_gt_remove.jsonl", "r", encoding="utf-8") as f:
+with open("mmdoc/MMDocIR_gt_remove.jsonl", "r", encoding="utf-8") as f:
     for line in f:
         queries.append(json.loads(line.strip()))
 
