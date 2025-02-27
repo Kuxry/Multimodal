@@ -1,144 +1,66 @@
-import os
+import pandas as pd
+import json
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, ConcatDataset
-from transformers import CLIPProcessor, CLIPModel
-from datasets import load_dataset, concatenate_datasets
+import csv
+import io
 from PIL import Image
+from transformers import BlipProcessor, BlipForConditionalGeneration
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
 
-# -------------------------------
-# 1. 加载数据集
-# -------------------------------
-# 加载 M2KR-Challenge 数据集（需要先登录 Hugging Face）
-ds_m2kr = load_dataset("BByrneLab/multi_task_multi_modal_knowledge_retrieval_benchmark_M2KR", "CC_data")
+# ✅ 设备选择
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# 加载 MMDocIR-Challenge 数据集
-ds_mmdoc = load_dataset("MMDocIR/MMDocIR-Challenge")
+# ✅ 加载 BLIP-2 处理器和模型
+processor = BlipProcessor.from_pretrained("Salesforce/blip2-flan-t5-xl")
+model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip2-flan-t5-xl").to(device)
 
-# 假设两个数据集都只有 "train"，可以分别拆分后再合并
-train_datasets = []
-test_datasets = []
+# ✅ 读取 `MMDocIR_doc_passages.parquet`
+df = pd.read_parquet("MMDocIR_doc_passages.parquet")
 
-if "train" in ds_m2kr:
-    split = ds_m2kr["train"].train_test_split(test_size=0.1, seed=42)
-    train_datasets.append(split["train"])
-    test_datasets.append(split["test"])
+# ✅ 读取 `MMDocIR_gt_remove.jsonl`（测试集查询）
+queries = []
+with open("MMDocIR_gt_remove.jsonl", "r", encoding="utf-8") as f:
+    for line in f:
+        queries.append(json.loads(line.strip()))
 
-if "train" in ds_mmdoc:
-    split = ds_mmdoc["train"].train_test_split(test_size=0.1, seed=42)
-    train_datasets.append(split["train"])
-    test_datasets.append(split["test"])
+# ✅ `query` - `passage` 匹配函数
+def retrieve_top_k_passages(query, doc_name, top_k=5):
+    doc_pages = df[df["doc_name"] == doc_name]  # 获取该文档的所有页面
+    scores, passage_ids = [], []
 
-# 合并拆分后的训练集和测试集
-from mmdoc import concatenate_datasets
+    for _, passage in doc_pages.iterrows():
+        image = Image.open(io.BytesIO(passage["image_binary"])).convert("RGB")
 
-if len(train_datasets) > 1:
-    train_dataset = concatenate_datasets(train_datasets)
-else:
-    train_dataset = train_datasets[0]
+        # 处理图片并生成文本描述
+        inputs = processor(image, query, return_tensors="pt").to(device)
+        output = model.generate(**inputs)
+        generated_text = processor.batch_decode(output, skip_special_tokens=True)[0]
 
-if len(test_datasets) > 1:
-    test_dataset = concatenate_datasets(test_datasets)
-else:
-    test_dataset = test_datasets[0]
+        # 计算 `query` 和 `generated_text` 余弦相似度
+        vectorizer = TfidfVectorizer()
+        tfidf_matrix = vectorizer.fit_transform([query, generated_text])
+        similarity_score = cosine_similarity(tfidf_matrix[0], tfidf_matrix[1])[0][0]
 
-print("训练集大小:", len(train_dataset))
-print("测试集大小:", len(test_dataset))
-print("M2KR 数据集字段:", ds_m2kr["train"].column_names)
-print("MMDocIR 数据集字段:", ds_mmdoc["train"].column_names)
+        scores.append(similarity_score)
+        passage_ids.append(passage["passage_id"])
 
-# -------------------------------
-# 2. 初始化 CLIP 模型和处理器
-# -------------------------------
-processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model.to(device)
+    # 返回 top-k `passage_id`
+    sorted_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+    return [passage_ids[i] for i in sorted_indices[:top_k]]
 
+# ✅ 生成 `submission.csv`
+submission_file = "submission.csv"
+with open(submission_file, "w", newline="") as f:
+    writer = csv.writer(f)
+    writer.writerow(["question_id", "passage_id"])
 
-# -------------------------------
-# 3. 定义 collate_fn 处理函数
-# -------------------------------
-def collate_fn(batch):
-    texts = []
-    images = []
-    for item in batch:
-        # 根据实际情况调整字段名称
-        texts.append(item.get("text", ""))
+    for item in queries:
+        question_id = item["question_id"]
+        doc_name = item["doc_name"]
 
-        img_item = item.get("image", None)
-        # 如果图像数据为 None，则创建一张占位图（这里设置大小为 224x224，可根据模型要求调整）
-        if img_item is None:
-            image = Image.new("RGB", (224, 224), (255, 255, 255))
-        else:
-            # 如果 img_item 为文件路径，则加载图像
-            if isinstance(img_item, str):
-                if os.path.exists(img_item):
-                    image = Image.open(img_item).convert("RGB")
-                else:
-                    raise FileNotFoundError(f"Image file not found: {img_item}")
-            else:
-                image = img_item  # 假设已经是 PIL.Image 对象
-        images.append(image)
+        top_passages = retrieve_top_k_passages(item["question"], doc_name, top_k=10)
 
-    # 同时预处理文本和图像
-    inputs = processor(text=texts, images=images, return_tensors="pt", padding=True)
-    return inputs
+        writer.writerow([question_id, str(top_passages)])
 
-
-# -------------------------------
-# 4. 构造 DataLoader
-# -------------------------------
-train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, collate_fn=collate_fn)
-test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False, collate_fn=collate_fn)
-
-# -------------------------------
-# 5. 定义优化器和损失函数
-# -------------------------------
-optimizer = torch.optim.Adam(model.parameters(), lr=5e-5)
-criterion = nn.CrossEntropyLoss()
-
-# -------------------------------
-# 6. 训练过程
-# -------------------------------
-num_epochs = 3  # 根据实际情况调整 Epoch 数量
-
-for epoch in range(num_epochs):
-    model.train()
-    total_loss = 0
-    for batch in train_loader:
-        optimizer.zero_grad()
-        # 将 batch 中所有 tensor 转移到指定设备
-        for key in batch:
-            batch[key] = batch[key].to(device)
-
-        # 前向传播得到输出，CLIP 输出包含 logits_per_text 与 logits_per_image
-        outputs = model(**batch)
-        logits = outputs.logits_per_text  # shape: [batch_size, batch_size]
-
-        # 对于每个样本，其正例为对角线上的索引
-        labels = torch.arange(logits.size(0)).to(device)
-        loss = criterion(logits, labels)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-
-    avg_loss = total_loss / len(train_loader)
-    print(f"Epoch {epoch + 1}/{num_epochs} - Average Loss: {avg_loss:.4f}")
-
-# -------------------------------
-# 7. 测试/评估过程
-# -------------------------------
-model.eval()
-all_logits = []
-with torch.no_grad():
-    for batch in test_loader:
-        for key in batch:
-            batch[key] = batch[key].to(device)
-
-        outputs = model(**batch)
-        logits = outputs.logits_per_text  # shape: [batch_size, batch_size]
-        all_logits.append(logits.cpu())
-
-all_logits = torch.cat(all_logits, dim=0)
-print("Test logits shape:", all_logits.shape)
+print(f"✅ Submission file generated: {submission_file}")
