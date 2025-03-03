@@ -10,11 +10,12 @@ from transformers import Blip2Processor
 from transformers import BlipForConditionalGeneration
 
 # ✅ 设备选择
-device = "cuda" if torch.cuda.is_available() else "cpu"
+
+device=torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 # ✅ 切换到 OPT 版本（支持推理）
 processor = Blip2Processor.from_pretrained("Salesforce/blip2-opt-2.7b")
-model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip2-opt-2.7b",ignore_mismatched_sizes=True).to("cuda")
+model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip2-opt-2.7b",ignore_mismatched_sizes=True).to("device")
 
 # ✅ 读取 `MMDocIR_doc_passages.parquet`
 df = pd.read_parquet("mmdoc/MMDocIR_doc_passages.parquet")
@@ -51,7 +52,7 @@ def retrieve_top_k_passages(query, doc_name, top_k=5):
     return [passage_ids[i] for i in sorted_indices[:top_k]]
 
 # ✅ 生成 `submission.csv`
-submission_file = "submission.csv"
+submission_file = "submission_mmdoc.csv"
 with open(submission_file, "w", newline="") as f:
     writer = csv.writer(f)
     writer.writerow(["question_id", "passage_id"])
@@ -60,7 +61,7 @@ with open(submission_file, "w", newline="") as f:
         question_id = item["question_id"]
         doc_name = item["doc_name"]
 
-        top_passages = retrieve_top_k_passages(item["question"], doc_name, top_k=10)
+        top_passages = retrieve_top_k_passages(item["question"], doc_name, top_k=5)
 
         writer.writerow([question_id, str(top_passages)])
 
