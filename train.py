@@ -10,12 +10,11 @@ from transformers import Blip2Processor
 from transformers import BlipForConditionalGeneration
 
 # ✅ 设备选择
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
-device=torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-
-# ✅ 切换到 OPT 版本（支持推理）
+# ✅ 让模型加载到正确的设备
 processor = Blip2Processor.from_pretrained("Salesforce/blip2-opt-2.7b")
-model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip2-opt-2.7b",ignore_mismatched_sizes=True).to("device")
+model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip2-opt-2.7b", ignore_mismatched_sizes=True).to(device)
 
 # ✅ 读取 `MMDocIR_doc_passages.parquet`
 df = pd.read_parquet("mmdoc/MMDocIR_doc_passages.parquet")
@@ -35,7 +34,7 @@ def retrieve_top_k_passages(query, doc_name, top_k=5):
         image = Image.open(io.BytesIO(passage["image_binary"])).convert("RGB")
 
         # 处理图片并生成文本描述
-        inputs = processor(image, query, return_tensors="pt").to(device)
+        inputs = processor(image, query, return_tensors="pt").to(device)  # ✅ 确保 inputs 也在 `cuda:1`
         output = model.generate(**inputs)
         generated_text = processor.batch_decode(output, skip_special_tokens=True)[0]
 
