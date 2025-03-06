@@ -12,7 +12,8 @@ from huggingface_hub import hf_hub_download
 from open_flamingo import create_model_and_transforms
 
 # ---------- 设备选择 ----------
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+
 
 # ---------- 1. 创建模型、图像处理器和分词器 ----------
 model, image_processor, tokenizer = create_model_and_transforms(
