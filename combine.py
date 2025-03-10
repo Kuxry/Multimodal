@@ -29,8 +29,8 @@ def merge_csv_files(file1, file2, output_file):
 
 # 示例用法
 if __name__ == "__main__":
-    file1 = "m2kr/submission_m2kr.csv"  # 第一个 CSV 文件路径
+    file1 = "m2kr/submission.csv"  # 第一个 CSV 文件路径
     file2 = "submission_mmdoc.csv"  # 第二个 CSV 文件路径
-    output_file = "merged_output.csv"  # 输出文件路径
+    output_file = "output/merged_output_flamingo_bilp2.csv"  # 输出文件路径
 
     merge_csv_files(file1, file2, output_file)
