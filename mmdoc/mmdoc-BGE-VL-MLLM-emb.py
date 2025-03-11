@@ -1,9 +1,12 @@
 import torch
-from transformers import AutoModel
+from transformers import AutoModel, AutoConfig, LlavaNextProcessor
 from PIL import Image
 import pandas as pd
 import json
 import re
+import numpy as np
+import os
+
 from io import BytesIO
 
 
@@ -19,6 +22,7 @@ def clean_text(text):
 # 读取数据
 MMDocIR_gt_file = "MMDocIR_gt_remove.jsonl"
 MMDocIR_doc_file = "MMDocIR_doc_passages.parquet"
+IMAGE_BASE_PATH = "./"  # 图片存放的基础路径
 
 
 dataset_df = pd.read_parquet(MMDocIR_doc_file)
@@ -33,13 +37,19 @@ model = AutoModel.from_pretrained(MODEL_NAME, trust_remote_code=True).to(device)
 model.eval()
 
 
-# **创建空白图片**
-def create_blank_image():
-    img = Image.new("RGB", (64, 64), (255, 255, 255))  # 创建空白白色图片
-    img_byte_arr = BytesIO()
-    img.save(img_byte_arr, format="PNG")
-    img_byte_arr.seek(0)  # 重置指针
-    return img_byte_arr  # 返回 BytesIO 对象
+# **检查图片有效性**
+def check_image_valid(image_path):
+    """检查图片是否可用，并返回有效路径"""
+    full_path = os.path.join(IMAGE_BASE_PATH, image_path)
+    if os.path.exists(full_path):
+        try:
+            img = Image.open(full_path)
+            img.verify()  # 仅验证
+            img = Image.open(full_path).convert("RGB")  # 重新打开
+            return full_path
+        except Exception as e:
+            print(f"[ERROR] 读取图片失败: {full_path}, 错误: {e}")
+    return None
 
 
 # **处理第一个样例**
@@ -60,10 +70,11 @@ with torch.no_grad():
         # **优先使用 vlm_text，其次 ocr_text**
         text = clean_text(row["vlm_text"]) if row["vlm_text"] else clean_text(row["ocr_text"]) if row[
             "ocr_text"] else None
-        image_path = None  # 直接用空白图片替代
+        image_path = row["image_path"] if isinstance(row["image_path"], str) and pd.notna(row["image_path"]) else None
+        valid_image_path = check_image_valid(image_path) if image_path else None
 
         candidate_texts.append(text)
-        candidate_images.append(create_blank_image())
+        candidate_images.append(valid_image_path)
         passage_ids.append(row["passage_id"])
 
     print(f"[DEBUG] 处理后的候选文本数: {len(candidate_texts)}")
@@ -77,23 +88,25 @@ with torch.no_grad():
     query_embs = torch.nn.functional.normalize(query_embs, dim=-1)
 
     # **逐批处理候选页面**
-    batch_size = 1  # 减小批处理大小
+    batch_size = 1  # 进一步减小批处理大小
     candi_embs_list = []
     num_batches = len(candidate_texts) // batch_size + (1 if len(candidate_texts) % batch_size > 0 else 0)
 
     for i in range(num_batches):
         batch_texts = candidate_texts[i * batch_size: (i + 1) * batch_size]
-        batch_images = [create_blank_image()] * len(batch_texts)  # 用空白图片填充
+        batch_images = candidate_images[i * batch_size: (i + 1) * batch_size]
 
         print(f"[DEBUG] 处理批次 {i + 1}/{num_batches}...")
         try:
+            torch.cuda.empty_cache()
+
             candidate_inputs = model.data_process(text=batch_texts, images=batch_images, q_or_c="c")
             batch_candi_embs = model(**candidate_inputs, output_hidden_states=True)[:, -1, :].to(device)
             batch_candi_embs = torch.nn.functional.normalize(batch_candi_embs, dim=-1)
             candi_embs_list.append(batch_candi_embs)
         except Exception as e:
             print(f"[ERROR] 处理图片失败: {e}")
-            torch.cuda.empty_cache()  # 释放显存
+            torch.cuda.empty_cache()
             continue
 
     # **合并所有 embedding**
@@ -106,10 +119,13 @@ with torch.no_grad():
     # **计算相似度**
     scores = torch.matmul(query_embs, candi_embs.T)
 
-    # **获取最佳匹配**
-    best_match_idx = torch.argmax(scores).item()
-    best_passage_id = passage_ids[best_match_idx]
+    # **获取前5个最佳匹配 passage_id**
+    top_k = 5
+    top_indices = torch.topk(scores, top_k, dim=1).indices.squeeze(0).tolist()
+    top_passage_ids = [passage_ids[idx] for idx in top_indices]
+    top_scores = [scores[0, idx].item() for idx in top_indices]
 
     print(f"Query: {query_text}")
-    print(f"Best Matched Passage ID: {best_passage_id}")
-    print(f"Score: {scores[0, best_match_idx].item()}")
+    print("Top 5 Best Matched Passage IDs and Scores:")
+    for pid, score in zip(top_passage_ids, top_scores):
+        print(f"Passage ID: {pid}, Score: {score}")
