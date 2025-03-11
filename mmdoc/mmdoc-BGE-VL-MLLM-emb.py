@@ -68,7 +68,11 @@ def check_image_valid(image_path):
 
 with torch.no_grad():
     model.set_processor(MODEL_NAME)
-    model.processor.patch_size = 14
+    # **修复 patch_size**
+    config = AutoConfig.from_pretrained(MODEL_NAME)
+    patch_size = getattr(config.vision_config, "patch_size", 14)  # 默认 14
+    model.processor.patch_size = patch_size
+    print(f"[DEBUG] patch_size 确认: {model.processor.patch_size}")
 
     for item in data_json[:1]:  # 只测试第一个样例
         query_text = item["question"]
