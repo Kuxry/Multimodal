@@ -31,7 +31,7 @@ for line in open(MMDocIR_gt_file, 'r', encoding="utf-8"):
 MODEL_NAME = "BAAI/BGE-VL-MLLM-S2"
 
 # 加载模型
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 model = AutoModel.from_pretrained(MODEL_NAME, trust_remote_code=True)
 model.eval()
 model.to(device)
@@ -68,6 +68,7 @@ def check_image_valid(image_path):
 
 with torch.no_grad():
     model.set_processor(MODEL_NAME)
+    model.processor.patch_size = 14
 
     for item in data_json[:1]:  # 只测试第一个样例
         query_text = item["question"]
