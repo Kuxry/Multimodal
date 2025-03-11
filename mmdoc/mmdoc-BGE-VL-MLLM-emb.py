@@ -1,11 +1,13 @@
 import torch
-from transformers import AutoModel, AutoConfig,LlavaNextProcessor
+from transformers import AutoModel, AutoConfig, LlavaNextProcessor
 from PIL import Image
 import pandas as pd
 import json
 import re
 import numpy as np
 import os
+
+from io import BytesIO
 
 
 # 过滤无效字符的函数
@@ -20,129 +22,97 @@ def clean_text(text):
 # 读取数据
 MMDocIR_gt_file = "MMDocIR_gt_remove.jsonl"
 MMDocIR_doc_file = "MMDocIR_doc_passages.parquet"
-IMAGE_BASE_PATH = "./"  # 图片存放的基础路径
+
 
 dataset_df = pd.read_parquet(MMDocIR_doc_file)
-data_json = []
-for line in open(MMDocIR_gt_file, 'r', encoding="utf-8"):
-    data_json.append(json.loads(line.strip()))
+data_json = [json.loads(line.strip()) for line in open(MMDocIR_gt_file, 'r', encoding="utf-8")]
 
 # 定义模型名称
 MODEL_NAME = "BAAI/BGE-VL-MLLM-S2"
 
 # 加载模型
 device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
-model = AutoModel.from_pretrained(MODEL_NAME, trust_remote_code=True)
+model = AutoModel.from_pretrained(MODEL_NAME, trust_remote_code=True).to(device)
 model.eval()
-model.to(device)
 
 
-config = AutoConfig.from_pretrained(MODEL_NAME)
-print(config)  # 输出完整的配置信息，查看是否包含 patch_size
-
-def check_image_valid(image_path):
-    """检查本地图片是否能成功打开，并确保尺寸非空"""
-    full_path = os.path.join(IMAGE_BASE_PATH, image_path)
-    print(f"[DEBUG] 尝试检查图片: {full_path}")
-
-    if os.path.exists(full_path):
-        try:
-            img = Image.open(full_path)
-            img.verify()  # 仅验证图片是否损坏，不加载到内存
-            img = Image.open(full_path).convert("RGB")  # 重新打开
-            width, height = img.size
-
-            if width is None or height is None:
-                print(f"[ERROR] 图片 {full_path} 尺寸异常，跳过")
-                return None
-
-            print(f"[DEBUG] 图片可用: {full_path}, 尺寸: {width}x{height}")
-            return full_path  # 这里返回路径，而不是 `PIL.Image`
-        except Exception as e:
-            print(f"[ERROR] 读取图片失败: {full_path}, 错误: {e}")
-            return None
-    else:
-        print(f"[ERROR] 图片不存在: {full_path}")
-        return None  # 如果文件不存在，返回 None
+# **创建空白图片**
+def create_blank_image():
+    img = Image.new("RGB", (64, 64), (255, 255, 255))  # 创建空白白色图片
+    img_byte_arr = BytesIO()
+    img.save(img_byte_arr, format="PNG")
+    img_byte_arr.seek(0)  # 重置指针
+    return img_byte_arr  # 返回 BytesIO 对象
 
 
+# **处理第一个样例**
 with torch.no_grad():
     model.set_processor(MODEL_NAME)
     # **修复 patch_size**
-    config = AutoConfig.from_pretrained(MODEL_NAME)
-    patch_size = getattr(config.vision_config, "patch_size", 14)  # 默认 14
-    model.processor.patch_size = patch_size
+    model.processor.patch_size = 14
     print(f"[DEBUG] patch_size 确认: {model.processor.patch_size}")
 
-    for item in data_json[:1]:  # 只测试第一个样例
-        query_text = item["question"]
-        doc_name = item["doc_name"]
-        doc_pages = dataset_df.loc[dataset_df['doc_name'] == doc_name]
+    item = data_json[0]  # 只测试第一个样例
+    query_text = item["question"]
+    doc_name = item["doc_name"]
+    doc_pages = dataset_df.loc[dataset_df['doc_name'] == doc_name]
 
-        # 修改后的候选数据收集
-        candidate_texts = []
-        candidate_images = []  # 存储图片路径
-        passage_ids = []
+    candidate_texts, candidate_images, passage_ids = [], [], []
 
-        for _, row in doc_pages.iterrows():
-            text = clean_text(row["vlm_text"]) if row["vlm_text"] else clean_text(row["ocr_text"]) if row[
-                "ocr_text"] else "[EMPTY]"
-            image_path = row["image_path"] if isinstance(row["image_path"], str) and pd.notna(
-                row["image_path"]) else None
+    for _, row in doc_pages.iterrows():
+        # **优先使用 vlm_text，其次 ocr_text**
+        text = clean_text(row["vlm_text"]) if row["vlm_text"] else clean_text(row["ocr_text"]) if row[
+            "ocr_text"] else None
+        image_path = None  # 直接用空白图片替代
 
-            candidate_texts.append(text)
-            candidate_images.append(image_path)  # 存储路径
-            passage_ids.append(row["passage_id"])
+        candidate_texts.append(text)
+        candidate_images.append(create_blank_image())
+        passage_ids.append(row["passage_id"])
 
-        # 过滤无效路径，并确保 `candidate_images` 里存储的是 **路径**
-        valid_candidate_texts = []
-        valid_candidate_images = []
-        valid_passage_ids = []
+    print(f"[DEBUG] 处理后的候选文本数: {len(candidate_texts)}")
+    print(f"[DEBUG] 处理后的候选图片数: {len(candidate_images)}")
 
-        for i in range(len(candidate_images)):
-            valid_path = check_image_valid(candidate_images[i]) if candidate_images[i] else None
-            if valid_path:  # 确保路径有效
-                valid_candidate_texts.append(candidate_texts[i])
-                valid_candidate_images.append(valid_path)  # 存储路径，而不是 PIL.Image
-                valid_passage_ids.append(passage_ids[i])
+    # **计算查询文本的 embedding**
+    print("[DEBUG] 开始计算查询文本 embedding...")
+    query_inputs = model.data_process(text=query_text, images=None, q_or_c="q",
+                                      task_instruction="Retrieve the most relevant document page based on text matching.")
+    query_embs = model(**query_inputs, output_hidden_states=True)[:, -1, :].to(device)
+    query_embs = torch.nn.functional.normalize(query_embs, dim=-1)
 
-        print(f"[DEBUG] 处理后的候选图片数: {len(valid_candidate_images)}")
+    # **逐批处理候选页面**
+    batch_size = 1  # 减小批处理大小
+    candi_embs_list = []
+    num_batches = len(candidate_texts) // batch_size + (1 if len(candidate_texts) % batch_size > 0 else 0)
 
-        # 处理查询输入
-        query_inputs = model.data_process(
-            text=query_text,
-            images=None,  # 不传 images 避免错误
-            q_or_c="q",
-            task_instruction="Retrieve the most relevant document page based on text matching."
-        )
+    for i in range(num_batches):
+        batch_texts = candidate_texts[i * batch_size: (i + 1) * batch_size]
+        batch_images = [create_blank_image()] * len(batch_texts)  # 用空白图片填充
 
-        # 处理候选页面输入
+        print(f"[DEBUG] 处理批次 {i + 1}/{num_batches}...")
         try:
-            print(f"[DEBUG] 传递给 processor 的图片路径: {valid_candidate_images}")
-            candidate_inputs = model.data_process(
-                text=valid_candidate_texts,
-                images=valid_candidate_images,  # 传递路径，而不是 PIL.Image
-                q_or_c="c",
-            )
+            candidate_inputs = model.data_process(text=batch_texts, images=batch_images, q_or_c="c")
+            batch_candi_embs = model(**candidate_inputs, output_hidden_states=True)[:, -1, :].to(device)
+            batch_candi_embs = torch.nn.functional.normalize(batch_candi_embs, dim=-1)
+            candi_embs_list.append(batch_candi_embs)
         except Exception as e:
             print(f"[ERROR] 处理图片失败: {e}")
-            raise
+            torch.cuda.empty_cache()  # 释放显存
+            continue
 
-        # 计算嵌入向量
-        query_embs = model(**query_inputs, output_hidden_states=True)[:, -1, :].to(device)
-        candi_embs = model(**candidate_inputs, output_hidden_states=True)[:, -1, :].to(device)
+    # **合并所有 embedding**
+    if candi_embs_list:
+        candi_embs = torch.cat(candi_embs_list, dim=0)
+    else:
+        print("[ERROR] 无可用候选项")
+        exit()
 
-        # 归一化嵌入向量
-        query_embs = torch.nn.functional.normalize(query_embs, dim=-1)
-        candi_embs = torch.nn.functional.normalize(candi_embs, dim=-1)
+    # **计算相似度**
+    scores = torch.matmul(query_embs, candi_embs.T)
 
-        # 计算相似度得分
-        scores = torch.matmul(query_embs, candi_embs.T)
+    # **获取最佳匹配**
+    best_match_idx = torch.argmax(scores).item()
+    best_passage_id = passage_ids[best_match_idx]
 
-        # 获取最佳匹配 passage_id
-        best_match_idx = torch.argmax(scores).item()
-        best_passage_id = valid_passage_ids[best_match_idx]
-
-        print(f"Query: {query_text}")
-        print(f"Best Matched Passage ID: {best_passage_id}")
-        print(f"Score: {scores[0, best_match_idx].item()}")
+    print(f"Query: {query_text}")
+    print(f"Best Matched Passage ID: {best_passage_id}")
+    print(f"Score: {scores[0, best_match_idx].item()}")
