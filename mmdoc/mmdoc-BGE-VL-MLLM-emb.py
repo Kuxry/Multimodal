@@ -1,12 +1,9 @@
 import torch
-from transformers import AutoModel, AutoConfig, LlavaNextProcessor
+from transformers import AutoModel
 from PIL import Image
 import pandas as pd
 import json
 import re
-import numpy as np
-import os
-
 from io import BytesIO
 
 
