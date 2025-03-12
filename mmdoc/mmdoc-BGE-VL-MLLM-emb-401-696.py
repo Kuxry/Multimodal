@@ -65,7 +65,7 @@ with torch.no_grad():
     for idx, item in enumerate(data_json):
         query_text = item["question"]
         question_id = item["question_id"]
-        print(f"[INFO] 处理 question_id: {question_id} ({idx + 1}/400)")
+        print(f"[INFO] 处理 question_id: {question_id} ({idx + 1}/696)")
         doc_name = item["doc_name"]
         doc_pages = dataset_df.loc[dataset_df['doc_name'] == doc_name]
 
