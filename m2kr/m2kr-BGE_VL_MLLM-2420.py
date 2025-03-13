@@ -24,7 +24,9 @@ df_passages = pd.read_parquet(passage_file)
 df_queries = pd.read_parquet(query_file)
 
 # ✅ 图片目录
-image_dir = "query_images/"
+query_image_dir = "query_images/"
+passage_image_dir = "passage_images/Challenge"
+
 
 # ✅ 过滤无效字符的函数
 def clean_text(text):
@@ -34,9 +36,10 @@ def clean_text(text):
     text = re.sub(r"\s+", " ", text).strip()
     return text if text else "[EMPTY]"
 
+
 # ✅ 检查图片有效性
-def check_image_valid(image_path):
-    full_path = os.path.join(image_dir, image_path)
+def check_image_valid(image_path, base_dir):
+    full_path = os.path.join(base_dir, image_path)
     if os.path.exists(full_path):
         try:
             img = Image.open(full_path)
@@ -44,11 +47,12 @@ def check_image_valid(image_path):
             img = Image.open(full_path).convert("RGB")
             return full_path
         except Exception as e:
-            print(f"[ERROR] 无法读取图片: {full_path}, 错误: {e}")
+            print(f"[ERROR] 读取图片失败: {full_path}, 错误: {e}")
     return None
 
-# ✅ 仅处理指定范围的 query
-batch_queries = df_queries.iloc[1:2420]
+
+# ✅ 仅处理前 2420 个 query
+batch_queries = df_queries.iloc[0:2420]
 output_file = "submission_bge_m2kr_part1_2420.csv"
 
 # 创建 CSV 并写入标题
@@ -65,15 +69,23 @@ with torch.no_grad():
         img_path = query["img_path"] if pd.notna(query["img_path"]) else None
         print(f"[INFO] 处理 question_id: {question_id} ({idx + 1}/2420)")
 
-        # **计算查询文本的 embedding**
+        # **处理查询文本和图片**
         query_text = instruction if question is None else f"{instruction} {question}"
-        query_inputs = model.data_process(text=query_text, images=None, q_or_c="q")
+        query_image = check_image_valid(img_path, query_image_dir) if img_path else None
+
+        query_inputs = model.data_process(
+            text=query_text,
+            images=query_image,
+            q_or_c="q",
+            task_instruction="Retrieve the most relevant document page based on text and image matching."
+        )
         query_embs = model(**query_inputs, output_hidden_states=True)[:, -1, :].to(device)
         query_embs = torch.nn.functional.normalize(query_embs, dim=-1)
 
-        # **计算候选 passage 的 embedding**
+        # **处理候选 passage**
         candidate_texts = df_passages["passage_content"].apply(clean_text).tolist()
-        candidate_images = df_passages["page_screenshot"].apply(check_image_valid).tolist()
+        candidate_images = df_passages["page_screenshot"].apply(
+            lambda x: check_image_valid(x, passage_image_dir)).tolist()
         passage_ids = df_passages["passage_id"].tolist()
 
         batch_size = 1
@@ -86,7 +98,11 @@ with torch.no_grad():
 
             try:
                 torch.cuda.empty_cache()
-                candidate_inputs = model.data_process(text=batch_texts, images=batch_images, q_or_c="c")
+                candidate_inputs = model.data_process(
+                    text=batch_texts,
+                    images=batch_images,
+                    q_or_c="c"
+                )
                 batch_candi_embs = model(**candidate_inputs, output_hidden_states=True)[:, -1, :].to(device)
                 batch_candi_embs = torch.nn.functional.normalize(batch_candi_embs, dim=-1)
                 candi_embs_list.append(batch_candi_embs)
