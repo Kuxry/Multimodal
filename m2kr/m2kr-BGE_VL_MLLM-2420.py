@@ -67,7 +67,7 @@ with torch.no_grad():
         instruction = query["instruction"]
         question = query["question"] if pd.notna(query["question"]) else None
         img_path = query["img_path"] if pd.notna(query["img_path"]) else None
-        print(f"[INFO] 处理 question_id: {question_id} ({idx + 1}/2420)")
+        print(f"[INFO] 处理 question_id: {question_id} ({idx}/2420)")
 
         # **处理查询文本和图片**
         query_text = instruction if question is None else f"{instruction} {question}"
