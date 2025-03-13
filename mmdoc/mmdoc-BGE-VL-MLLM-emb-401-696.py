@@ -50,7 +50,7 @@ def check_image_valid(image_path):
 
 
 # 仅处理前400个问题
-data_json = data_json[401:696]
+data_json = data_json[400:696]
 
 results = []
 output_file = "mmdoc-401-696.csv"
@@ -65,7 +65,7 @@ with torch.no_grad():
     for idx, item in enumerate(data_json):
         query_text = item["question"]
         question_id = item["question_id"]
-        print(f"[INFO] 处理 question_id: {question_id} ({idx + 1}/696)")
+        print(f"[INFO] 处理 question_id: {question_id} ({idx + 401}/696)")
         doc_name = item["doc_name"]
         doc_pages = dataset_df.loc[dataset_df['doc_name'] == doc_name]
 
