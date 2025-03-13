@@ -43,7 +43,7 @@ df_passages = pd.read_parquet("challenge_passage/train-00000-of-00001.parquet")
 df_queries = pd.read_parquet("challenge_data/train-00000-of-00001.parquet")
 
 # ---------- 6. 图片文件目录 ----------
-image_dir = "images/"  # 确保这个目录包含所有 `img_path` 指定的图片
+image_dir = "query_images/"  # 确保这个目录包含所有 `img_path` 指定的图片
 
 # ---------- 7. 检索函数：从一条 query 中检索前 k 条相关的 Passage ----------
 def retrieve_top_k_passages(question_id, instruction, question, img_path, top_k=5):

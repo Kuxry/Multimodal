@@ -24,7 +24,7 @@ df_passages = pd.read_parquet(passage_file)
 df_queries = pd.read_parquet(query_file)
 
 # ✅ 图片目录
-image_dir = "images/"
+image_dir = "query_images/"
 
 # ✅ 过滤无效字符的函数
 def clean_text(text):

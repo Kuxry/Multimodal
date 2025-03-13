@@ -30,7 +30,7 @@ def retrieve_top_k_passages(
     instruction,
     question,
     img_path,
-    image_dir="images/",
+    image_dir="query_images/",
     device="cuda",
     top_k=5
 ):
@@ -178,7 +178,7 @@ def main_worker(rank, world_size):
             top_passages = retrieve_top_k_passages(
                 fsdp_model, tokenizer, image_processor, df_passages,
                 question_id, instruction, question, img_path,
-                image_dir="images/",
+                image_dir="query_images/",
                 device=device,
                 top_k=5
             )

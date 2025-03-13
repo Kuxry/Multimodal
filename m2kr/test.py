@@ -22,7 +22,7 @@ df_passages = pd.read_parquet("challenge_passage/train-00000-of-00001.parquet")
 df_queries = pd.read_parquet("challenge_data/train-00000-of-00001.parquet")
 
 # ✅ 图片文件目录
-image_dir = "images/"  # 确保这个目录包含所有 `img_path` 指定的图片
+image_dir = "query_images/"  # 确保这个目录包含所有 `img_path` 指定的图片
 
 # ✅ `query` - `passage` 检索匹配函数
 def retrieve_top_k_passages(question_id, instruction, question, img_path, top_k=5):
