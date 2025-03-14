@@ -5,6 +5,7 @@ import re
 from PIL import Image
 from transformers import AutoModel
 import warnings
+
 Image.MAX_IMAGE_PIXELS = None
 warnings.filterwarnings("ignore", category=Image.DecompressionBombWarning)
 
@@ -38,7 +39,7 @@ df_passages = df_passages.iloc[:15700]  # 仅保留前 15700 行
 print(f"[INFO] Now using {len(df_passages)} passages for embedding")
 
 # ------------------------------
-# 4. 定义文本清洗 & 图像检查函数
+# 4. 定义文本清洗函数
 # ------------------------------
 def clean_text(text):
     """清理文本，去除非 ASCII 字符以及多余的空格。"""
@@ -48,35 +49,57 @@ def clean_text(text):
     text = re.sub(r"\s+", " ", text).strip()
     return text if text else "[EMPTY]"
 
-def check_image_valid(image_path, base_dir):
-    """检查图片是否存在且能正常读取，若正常则返回完整路径，否则返回 None。"""
+# ------------------------------
+# 5. 定义函数：加载并切分图片上半部分
+# ------------------------------
+def load_and_split_top_half(image_path, base_dir):
+    """
+    1. 检查图片是否存在
+    2. 验证图片是否能正常读取
+    3. 切分并返回图片的上半部分（PIL Image）。
+       如果任意环节失败，则返回 None。
+    """
     if not isinstance(image_path, str):
         return None
     full_path = os.path.join(base_dir, image_path)
-    if os.path.exists(full_path):
-        try:
-            with Image.open(full_path) as img:
-                img.verify()
-            return full_path
-        except Exception as e:
-            print(f"[ERROR] 读取图片失败: {full_path}, 错误: {e}")
-    return None
+    if not os.path.exists(full_path):
+        return None
+
+    try:
+        # 第一次打开只做 verify()
+        with Image.open(full_path) as im_verify:
+            im_verify.verify()
+
+        # 第二次打开用于实际处理
+        with Image.open(full_path) as img:
+            w, h = img.size
+            # 计算高度的一半
+            half_h = h // 2
+            # 这里示例仅返回“上半部分”图像
+            top_half = img.crop((0, 0, w, half_h))
+            return top_half
+
+    except Exception as e:
+        print(f"[ERROR] 加载/切分图片失败: {full_path}, 错误: {e}")
+        return None
 
 # ------------------------------
-# 5. 对Passage文本 & 图片做预处理
+# 6. 对Passage文本 & 图片做预处理
 # ------------------------------
 df_passages["cleaned_content"] = df_passages["passage_content"].apply(clean_text)
-df_passages["valid_image"] = df_passages["page_screenshot"].apply(
-    lambda x: check_image_valid(x, PASSAGE_IMAGE_DIR)
+
+# 原来是 check_image_valid，这里改成直接加载并切分出上半部分
+df_passages["half_image"] = df_passages["page_screenshot"].apply(
+    lambda x: load_and_split_top_half(x, PASSAGE_IMAGE_DIR)
 )
 
 passage_ids = df_passages["passage_id"].tolist()  # 用于后续查询时映射
-
 all_texts = df_passages["cleaned_content"].tolist()
-all_images = df_passages["valid_image"].tolist()
+# 注意这里改成取 half_image
+all_images = df_passages["half_image"].tolist()
 
 # ------------------------------
-# 6. 批量前向计算Passage向量
+# 7. 批量前向计算Passage向量
 # ------------------------------
 batch_size = 1  # 可根据显存或需求进行调整
 num_passages = len(df_passages)
@@ -94,18 +117,13 @@ with torch.no_grad():
         batch_imgs = all_images[start_idx:end_idx]
         batch_pids = passage_ids[start_idx:end_idx]  # 本批次对应的passage_id
 
-        # ============ 方法A：简洁打印该批次起止passage_id ============
-        # 打印一次该批次的区间信息
-        # 例如：batch 2/981, passage_id range: 12345 ~ 12360
         print(f"[INFO] Batch {i+1}/{num_batches}, passage_id range: {batch_pids[0]} ~ {batch_pids[-1]}")
-
-
 
         # data_process
         candidate_inputs = model.data_process(
             text=batch_texts,
-            images=batch_imgs,
-            q_or_c="c"  # 'c' for candidate passages
+            images=batch_imgs,  # 传入切好的上半部分图片
+            q_or_c="c"          # 'c' for candidate passages
         )
 
         # 前向计算得到向量
@@ -117,7 +135,6 @@ with torch.no_grad():
         batch_embs = batch_embs.cpu()
         emb_list.append(batch_embs)
 
-        # 仅做进度提示
         if (i + 1) % 10 == 0 or (i + 1) == num_batches:
             print(f"[INFO] Finished batch {i+1}/{num_batches}")
 
@@ -128,7 +145,7 @@ del emb_list
 print(f"[INFO] Completed. passage_embs shape = {passage_embs.shape}")
 
 # ------------------------------
-# 7. 保存向量 & ID 到文件
+# 8. 保存向量 & ID 到文件
 # ------------------------------
 save_dict = {
     "passage_ids": passage_ids,
