@@ -5,6 +5,7 @@ import re
 from PIL import Image
 from transformers import AutoModel
 import warnings
+
 Image.MAX_IMAGE_PIXELS = None
 warnings.filterwarnings("ignore", category=Image.DecompressionBombWarning)
 
@@ -30,10 +31,12 @@ model.set_processor(MODEL_NAME)
 model.processor.patch_size = 14
 
 # ------------------------------
-# 3. 载入 Passage 数据，并截取前15700行
+# 3. 载入 Passage 数据，并截取指定范围
 # ------------------------------
 df_passages = pd.read_parquet(PASSAGE_FILE)
 print(f"[INFO] Total passages: {len(df_passages)}")
+
+# 截取行号[15701, 31000)
 df_passages = df_passages.iloc[15701:31000]
 print(f"[INFO] Now using {len(df_passages)} passages for embedding")
 
@@ -70,13 +73,22 @@ df_passages["valid_image"] = df_passages["page_screenshot"].apply(
     lambda x: check_image_valid(x, PASSAGE_IMAGE_DIR)
 )
 
-passage_ids = df_passages["passage_id"].tolist()  # 用于后续查询时映射
+# ------------------------------
+# 6. 在批处理前过滤掉 None 行
+# ------------------------------
+before_filter_count = len(df_passages)
+df_passages = df_passages[~df_passages["valid_image"].isnull()].copy()
+after_filter_count = len(df_passages)
+print(f"[INFO] Filtered out {before_filter_count - after_filter_count} passages with invalid images.")
+print(f"[INFO] Remaining passages: {after_filter_count}")
 
+# 重新提取文本、图片、ID 列表
+passage_ids = df_passages["passage_id"].tolist()
 all_texts = df_passages["cleaned_content"].tolist()
 all_images = df_passages["valid_image"].tolist()
 
 # ------------------------------
-# 6. 批量前向计算Passage向量
+# 7. 批量前向计算Passage向量
 # ------------------------------
 batch_size = 1  # 可根据显存或需求进行调整
 num_passages = len(df_passages)
@@ -94,12 +106,8 @@ with torch.no_grad():
         batch_imgs = all_images[start_idx:end_idx]
         batch_pids = passage_ids[start_idx:end_idx]  # 本批次对应的passage_id
 
-        # ============ 方法A：简洁打印该批次起止passage_id ============
         # 打印一次该批次的区间信息
-        # 例如：batch 2/981, passage_id range: 12345 ~ 12360
         print(f"[INFO] Batch {i+1}/{num_batches}, passage_id range: {batch_pids[0]} ~ {batch_pids[-1]}")
-
-
 
         # data_process
         candidate_inputs = model.data_process(
@@ -128,7 +136,7 @@ del emb_list
 print(f"[INFO] Completed. passage_embs shape = {passage_embs.shape}")
 
 # ------------------------------
-# 7. 保存向量 & ID 到文件
+# 8. 保存向量 & ID 到文件
 # ------------------------------
 save_dict = {
     "passage_ids": passage_ids,
