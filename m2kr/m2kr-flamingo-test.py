@@ -132,6 +132,7 @@ def retrieve_top_k_passages(question_id, instruction, question, img_path, top_k=
     return [passage_id for _, passage_id in sorted_passages]
 
 # ---------- 8. 生成结果文件 `submission.csv` ----------
+# ---------- 8. 生成结果文件 `submission.csv` ----------
 submission_file = "submission_m2kr.csv"
 with open(submission_file, "w", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
