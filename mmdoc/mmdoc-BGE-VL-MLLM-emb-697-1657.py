@@ -6,8 +6,6 @@ import json
 import re
 import os
 
-
-
 # 过滤无效字符的函数
 def clean_text(text):
     if not isinstance(text, str):  # 防御非字符串输入
