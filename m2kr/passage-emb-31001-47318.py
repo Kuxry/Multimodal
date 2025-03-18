@@ -20,7 +20,7 @@ PASSAGE_FILE = "challenge_passage/train-00000-of-00001.parquet"  # 替换为你�
 PASSAGE_IMAGE_DIR = "passage_images/Challenge"                   # 若没有图片，可忽略此路径
 
 # 输出文件：保存前 15700 行的Passage向量
-OUTPUT_EMB_FILE = "emb/passage_embeddings_3_31001-47318.pt"
+OUTPUT_EMB_FILE = "passage_embeddings_3_31001-47318.pt"
 
 # ------------------------------
 # 2. 加载模型

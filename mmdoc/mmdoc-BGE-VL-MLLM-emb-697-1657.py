@@ -114,16 +114,15 @@ with torch.no_grad():
 
         # **计算相似度**
         scores = torch.matmul(query_embs, candi_embs.T)
+        # --- 关键改动：让 top_k 不超过实际候选数量 ---
+        actual_candi_count = candi_embs.size(0)
+        top_k = min(5, actual_candi_count)  # 这里避免了“k 超出索引范围”
 
-        # **获取前5个最佳匹配 passage_id**
-        top_k = 5
         top_indices = torch.topk(scores, top_k, dim=1).indices.squeeze(0).tolist()
-        top_passage_ids = [passage_ids[idx] for idx in top_indices]
+        top_passage_ids = [passage_ids[i] for i in top_indices]
 
-        # **保证 passage_id 数量不超过 5，并转换为字符串格式**
+        # 将前 top_k 个 passage_id 转为字符串并保存
         top_passage_ids_str = "[" + ",".join(map(str, top_passage_ids)) + "]"
-
-        # **保存结果到 CSV 文件**
         pd.DataFrame([[question_id, top_passage_ids_str]], columns=["question_id", "passage_id"]).to_csv(
             output_file, mode='a', header=False, index=False, encoding="utf-8"
         )
