@@ -48,10 +48,10 @@ def check_image_valid(image_path):
 
 
 #697-1657
-data_json = data_json[697:1657]
+data_json = data_json[10899:11657]
 
 results = []
-output_file = "mmdoc-697-1657.csv"
+output_file = "mmdoc-10899-11657.csv"
 
 # 创建 CSV 并写入标题
 pd.DataFrame(columns=["question_id", "passage_id"]).to_csv(output_file, index=False, encoding="utf-8")
@@ -63,7 +63,7 @@ with torch.no_grad():
     for idx, item in enumerate(data_json):
         query_text = item["question"]
         question_id = item["question_id"]
-        print(f"[INFO] 处理 question_id: {question_id} ({idx + 697}/1657)")
+        print(f"[INFO] 处理 question_id: {question_id} ({idx + 10899}/11657)")
         doc_name = item["doc_name"]
         doc_pages = dataset_df.loc[dataset_df['doc_name'] == doc_name]
 
