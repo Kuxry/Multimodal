@@ -115,7 +115,7 @@ model.processor.patch_size = 14
 output_file = "submission_bge_r_rank_top5.csv"
 top_k = 5
 
-batch_size_q = 8
+batch_size_q = 12
 num_batches_q = (num_queries + batch_size_q - 1) // batch_size_q
 
 with open(output_file, mode="w", encoding="utf-8", newline="") as f:
@@ -149,7 +149,7 @@ with open(output_file, mode="w", encoding="utf-8", newline="") as f:
         # ====== 2. 对此小批量里的每个 Query 做 Rerank & 输出 ======
         for i_in_batch, qid in enumerate(batch_ids):
             # 调试输出当前处理的 query id
-            print(f"[INFO] Processing Query ID: {qid}")
+            #print(f"[INFO] Processing Query ID: {qid}")
 
             candidate_rows = df_candidates.loc[df_candidates["question_id"] == qid, "passage_id"].values
             if len(candidate_rows) == 0:
@@ -177,6 +177,6 @@ with open(output_file, mode="w", encoding="utf-8", newline="") as f:
             writer.writerow([qid, str(best_passages)])
             f.flush()  # 每处理完一个 query 就 flush
 
-            print(f"[INFO] Finished Query ID: {qid}")
+            #print(f"[INFO] Finished Query ID: {qid}")
 
 print(f"✅ 处理完成，结果已保存到 {output_file}")
