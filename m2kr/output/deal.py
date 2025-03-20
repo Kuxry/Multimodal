@@ -1,39 +1,47 @@
 import json
-import ast
 import pandas as pd
+import csv  # 用于控制 CSV 输出格式
+
 # 读取原始 CSV 文件
-input_file_path = "../emb/retrieval_results.csv"
-df = pd.read_csv(input_file_path)
+input_file_path = "merged_BGE_r_rank_top5.csv"
+df = pd.read_csv(input_file_path, dtype=str, quotechar='"')  # 读取为字符串，防止数据类型错乱
 
-# 将 "query_id" 列重命名为 "question_id"（如果存在）
-if "query_id" in df.columns:
-    df.rename(columns={"query_id": "question_id"}, inplace=True)
-
-# 确保 "question_id" 存在，否则创建一个从 0 开始的索引
+# 确保 `question_id` 列存在（如果缺失则自动创建）
 if "question_id" not in df.columns:
     df.insert(0, "question_id", range(len(df)))
 
-# 解析 "top_passage_ids" 列，确保格式匹配 JSON
-def safe_json_loads(x):
-    if isinstance(x, str) and x.strip():
+# 确保 `passage_id` 列存在
+if "passage_id" not in df.columns:
+    raise ValueError("❌ 错误: CSV 文件缺少 'passage_id' 列！")
+
+
+# 解析 `passage_id` 列，确保格式为 JSON 数组
+def format_to_json_list(x):
+    if isinstance(x, str) and x.strip():  # 确保非空
         try:
-            # 处理 Python 风格的列表（单引号）
-            if x.startswith("[") and x.endswith("]") and "'" in x:
-                return ast.literal_eval(x)  # 转换为 Python 列表
-            return json.loads(x)  # 直接解析 JSON
-        except (json.JSONDecodeError, ValueError, SyntaxError):
-            return []  # 解析失败返回空列表
-    return []  # 处理 NaN 或空值
+            # 先尝试 JSON 解析（标准格式）
+            data = json.loads(x)
+            if isinstance(data, list):
+                return json.dumps([str(pid) for pid in data])  # 统一字符串格式
+        except json.JSONDecodeError:
+            pass  # 继续处理 Python 风格列表
+
+        # 处理 Python 风格的列表（单引号）
+        try:
+            data = eval(x)  # 仅适用于受信数据
+            if isinstance(data, list):
+                return json.dumps([str(pid) for pid in data])  # 统一字符串格式
+        except (SyntaxError, ValueError):
+            return "[]"  # 解析失败，返回空列表
+
+    return "[]"  # 处理空值
+
 
 # 应用转换
-df["top_passage_ids"] = df["top_passage_ids"].apply(safe_json_loads)
-
-# 确保所有元素转换为字符串，并转换回 JSON 格式字符串
-df["top_passage_ids"] = df["top_passage_ids"].apply(lambda x: json.dumps([str(pid) for pid in x]))
-
-# 重命名列以匹配目标格式
-df.rename(columns={"top_passage_ids": "passage_id"}, inplace=True)
+df["passage_id"] = df["passage_id"].apply(format_to_json_list)
 
 # 保存到新的 CSV 文件
-output_file_path = "modified_submission-m2kr.csv"
-df.to_csv(output_file_path, index=False, quoting=2)  # quoting=2 确保 JSON 字符串正确
+output_file_path = "modified_merged_BGE_r_rank_top5.csv"
+df.to_csv(output_file_path, index=False, quoting=csv.QUOTE_ALL, quotechar='"')  # 强制双引号
+
+print(f"✅ 处理完成，已保存到 {output_file_path}")

@@ -27,12 +27,12 @@ print("[INFO] Performing similarity calculation via matrix multiplication...")
 # (Q, D) x (D, P) => (Q, P)
 scores = torch.matmul(query_embs_gpu, passage_embs_gpu.T)
 
-top_k = 5
+top_k = 100
 print(f"[INFO] Retrieving top {top_k} passages for each query...")
 top_scores, top_indices = torch.topk(scores, top_k, dim=1)  # shape: [Q, K] (scores & indices)
 
 # ========== 5. 保存结果到CSV（或打印） ==========
-output_csv = "retrieval_results.csv"
+output_csv = "retrieval_results-top100.csv"
 with open(output_csv, mode="w", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
     writer.writerow(["query_id", "top_passage_ids"])

@@ -9,7 +9,7 @@ import warnings
 import ast
 from tqdm import tqdm
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 Image.MAX_IMAGE_PIXELS = None
 warnings.filterwarnings("ignore", category=Image.DecompressionBombWarning)
@@ -52,7 +52,7 @@ df_queries = pd.read_parquet(query_file)
 df_candidates = pd.read_csv(candidate_file)
 
 # 若需要处理全部 query，这里直接使用整个 df_queries
-df_queries = df_queries
+df_queries = df_queries.iloc[2420:4420]
 
 # 将候选 passage 列由字符串转换为列表
 df_candidates["passage_id"] = df_candidates["passage_id"].apply(
@@ -112,10 +112,10 @@ print("Sample query ids:", query_ids[:10])
 model.set_processor(MODEL_NAME)
 model.processor.patch_size = 14
 
-output_file = "submission_bge_r_rank_top5.csv"
+output_file = "submission_bge_r_rank_top5_2420-4420.csv"
 top_k = 5
 
-batch_size_q = 12
+batch_size_q = 2
 num_batches_q = (num_queries + batch_size_q - 1) // batch_size_q
 
 with open(output_file, mode="w", encoding="utf-8", newline="") as f:
